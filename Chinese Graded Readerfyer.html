@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chinese Text Annotator</title>
+    <!-- 1. Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 2. Custom styles for annotation and printing */
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+        }
+
+        /* Style for the highlighted unknown characters */
+        .unknown-char {
+            background-color: #fef9c3; /* Tailwind 'yellow-100' */
+            color: #713f12; /* Tailwind 'yellow-900' */
+            border-radius: 3px;
+            padding: 0 2px;
+            text-decoration: none;
+            cursor: help;
+        }
+
+        /* Ensure superscripts are clean */
+        .unknown-ref {
+            vertical-align: super;
+            font-size: 0.75em;
+            line-height: 1;
+            margin-left: 1px;
+            color: #dc2626; /* Tailwind 'red-600' */
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        /* --- NEW: Loader Style --- */
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* --- END NEW --- */
+
+        /* Styles for printing to PDF */
+        @media print {
+            /* Hide the input section and button when printing */
+            #input-section, #process-btn, #print-btn {
+                display: none !important;
+            }
+
+            /* Ensure the output section takes full width */
+            #output-section {
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: none !important;
+            }
+
+            /* Force browser to print background colors */
+            .unknown-char {
+                background-color: #fef9c3 !important;
+                color: #000 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            /* Make links less obtrusive in print */
+            a {
+                text-decoration: none !important;
+                color: inherit !important;
+            }
+
+            /* Ensure glossary prints well */
+            #glossary-list {
+                list-style: decimal !important;
+                margin-left: 2em !important;
+                page-break-before: always; /* Start glossary on a new page */
+            }
+
+            #annotated-text {
+                font-size: 12pt; /* Standard print size */
+                line-height: 1.5;
+            }
+
+            h2 {
+                font-size: 16pt !important;
+                padding-top: 1rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="max-w-7xl mx-auto p-6 md:p-10">
+        <h1 class="text-3xl font-bold text-center mb-8 text-gray-900">Chinese Text Annotator</h1>
+
+        <!-- 3. Input Section -->
+        <div id="input-section" class="grid md:grid-cols-2 gap-6 mb-6">
+            <!-- Known Characters Input -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <label for="known-chars" class="block text-lg font-semibold mb-2">1. Known Characters</label>
+                <p class="text-sm text-gray-600 mb-4">Paste all your known characters here (from your CSV, no commas needed).</p>
+                <textarea id="known-chars" rows="10" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" placeholder="你 好 吗 我 是 ..."></textarea>
+            </div>
+            
+            <!-- Text to Analyze Input -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <label for="input-text" class="block text-lg font-semibold mb-2">2. Text to Analyze</label>
+                <p class="text-sm text-gray-600 mb-4">Paste the full Chinese text you want to read here.</p>
+                <textarea id="input-text" rows="10" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" placeholder="今天天气很好，我们去公园玩儿吧。"></textarea>
+            </div>
+        </div>
+
+        <!-- 4. Action Button -->
+        <div class="text-center mb-8">
+            <button id="process-btn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 text-lg flex items-center justify-center w-64 mx-auto disabled:opacity-75" style="min-height: 60px;">
+                Analyze Text
+            </button>
+        </div>
+
+        <!-- 5. Output Section -->
+        <div id="output-section" class="bg-white p-6 md:p-10 rounded-lg shadow-lg hidden">
+            <!-- Print Button -->
+            <button id="print-btn" onclick="window.print()" class="float-right -mt-4 bg-gray-700 text-white font-semibold py-2 px-5 rounded-md hover:bg-gray-800 transition">
+                Save as PDF
+            </button>
+            
+            <!-- Annotated Text -->
+            <h2 class="text-2xl font-bold mb-6 border-b pb-3">Analyzed Text</h2>
+            <div id="annotated-text" class="text-lg leading-relaxed whitespace-pre-wrap">
+                <!-- Processed text will be injected here -->
+            </div>
+
+            <!-- Glossary -->
+            <h2 class="text-2xl font-bold mt-12 mb-6 border-b pb-3">Unknown Character Glossary</h2>
+            <p class="text-sm text-gray-600 mb-4">A list of all unknown characters found in the text, in order of appearance. Click any character to see its pinyin and definition.</p>
+            <ol id="glossary-list" class="list-decimal list-inside space-y-4">
+                <!-- Glossary items will be injected here -->
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // 6. JavaScript Logic
+
+        /**
+         * Calls the Gemini API to get definitions.
+         * @param {string[]} chars - An array of Chinese characters.
+         * @returns {Promise<Array<{char: string, pinyin: string, definition: string}>>}
+         */
+        async function getCharacterDefinitions(chars) {
+            const apiKey = ""; // Leave empty
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            const prompt = `Provide pinyin (numbered, e.g., "ni3") and a brief, common English definition for each of the following Chinese characters: ${chars.join(', ')}.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                "char": { "type": "STRING" },
+                                "pinyin": { "type": "STRING" },
+                                "definition": { "type": "STRING" }
+                            },
+                            required: ["char", "pinyin", "definition"]
+                        }
+                    }
+                }
+            };
+
+            try {
+                // Implement exponential backoff for retries
+                let response;
+                let delay = 1000; // start with 1 second
+                for (let i = 0; i < 3; i++) { // Try up to 3 times
+                    response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        break; // Success
+                    }
+                    
+                    if (response.status === 429 || response.status >= 500) {
+                        // Rate limit or server error, wait and retry
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2; // Exponential backoff
+                    } else {
+                        // Other client-side error, don't retry
+                        throw new Error(`API call failed with status: ${response.status}`);
+                    }
+                }
+
+                if (!response.ok) {
+                    throw new Error(`API call failed after retries with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                  const jsonText = result.candidates[0].content.parts[0].text;
+                  
+                  // --- DEBUG LOGGING ---
+                  console.log("--- Raw API JSON Text Response ---");
+                  console.log(jsonText);
+                  // --- END DEBUG LOGGING ---
+                  
+                  try {
+                    const definitions = JSON.parse(jsonText);
+                    // Ensure the parsed result is an array before returning
+                    if (Array.isArray(definitions)) {
+                        return definitions;
+                    }
+                    throw new Error("API returned JSON, but it was not an array.");
+
+                  } catch (e) {
+                    console.error("Failed to parse JSON response:", e);
+                    console.error("Malformed JSON was:", jsonText);
+                    throw new Error("API returned malformed JSON.");
+                  }
+                } else {
+                  // Check for promptFeedback, which might indicate a block
+                  if (result.promptFeedback) {
+                      console.error("API call blocked:", result.promptFeedback);
+                      throw new Error(`API call was blocked. Reason: ${result.promptFeedback.blockReason || 'Unknown'}`);
+                  }
+                  throw new Error("Invalid response structure from API.");
+                }
+            } catch (error) {
+                console.error("Error fetching definitions:", error);
+                // Return an empty array so the rest of the app doesn't break
+                return []; 
+            }
+        }
+
+        document.getElementById('process-btn').addEventListener('click', async function() {
+            const processBtn = this;
+            // Show loading state
+            processBtn.disabled = true;
+            processBtn.innerHTML = `
+                <span class="loader"></span>
+                Analyzing...
+            `;
+            
+            try {
+                // Get inputs
+                const knownCharsRaw = document.getElementById('known-chars').value;
+                const inputText = document.getElementById('input-text').value;
+
+                // 1. Create a Set of known characters for fast lookup
+                // We remove all whitespace and newlines
+                const knownSet = new Set(knownCharsRaw.replace(/\s/g, ''));
+
+                // 2. Prepare for processing
+                let annotatedHtml = '';
+                let glossaryHtml = '';
+                const unknownCharMap = new Map(); // Stores {char: number}
+                let unknownCounter = 1;
+
+                // 3. Define the regex for Chinese characters
+                const chineseCharRegex = /[\u4e00-\u9fff]/;
+
+                // 4. Iterate through the input text character by character
+                for (const char of inputText) {
+                    if (char === '\n') {
+                        // Preserve newlines
+                        annotatedHtml += '<br>';
+                    } else if (chineseCharRegex.test(char)) {
+                        // It's a Chinese character
+                        if (knownSet.has(char)) {
+                            // Character is known
+                            annotatedHtml += char;
+                        } else {
+                            // Character is UNKNOWN
+                            let charId;
+                            if (unknownCharMap.has(char)) {
+                                // We've seen this unknown character before
+                                charId = unknownCharMap.get(char);
+                            } else {
+                                // First time seeing this unknown character
+                                charId = unknownCounter;
+                                unknownCharMap.set(char, charId);
+                                unknownCounter++;
+                            }
+                            
+                            // Create the link to an online dictionary
+                            const dictionaryLink = `https://www.mdbg.net/chinese/dictionary?page=worddict&wdrst=0&wdqb=${encodeURIComponent(char)}`;
+                            
+                            // Add the highlighted and numbered character to the text
+                            annotatedHtml += 
+                                `<a href="${dictionaryLink}" target="_blank" class="unknown-char" title="Look up '${char}'">` +
+                                `${char}` +
+                                `</a>` +
+                                `<a href="#glossary-item-${charId}" class="unknown-ref">${charId}</a>`;
+                        }
+                    } else {
+                        // It's not a Chinese char (punctuation, number, etc.)
+                        annotatedHtml += char;
+                    }
+                }
+                
+                // 5. Generate the glossary list
+                // Sort the map by ID (order of appearance)
+                const sortedUnknowns = [...unknownCharMap.entries()].sort((a, b) => a[1] - b[1]);
+
+                // --- NEW: Get definitions from API ---
+                const unknownChars = sortedUnknowns.map(entry => entry[0]);
+                
+                // --- DEBUG LOGGING ---
+                console.log("--- Characters to look up: ---");
+                console.log(unknownChars.join(''));
+                console.log(`Total unique characters: ${unknownChars.length}`);
+                // --- END DEBUG LOGGING ---
+                
+                let definitionMap = new Map();
+                if (unknownChars.length > 0) {
+                    // We'll show a more specific loading message for this part
+                    processBtn.innerHTML = `
+                        <span class="loader"></span>
+                        Fetching Definitions...
+                    `;
+                    try {
+                        const definitions = await getCharacterDefinitions(unknownChars);
+                        definitionMap = new Map(definitions.map(item => [item.char, item]));
+                    } catch (error) {
+                        console.error("Failed to get definitions during runtime:", error);
+                        // If API fails, we'll just show the character as before.
+                        glossaryHtml = "<li>**Error loading definitions:** The network request failed or the model returned an unparsable response. Check the console (F12) for details.</li>";
+                    }
+                }
+                // --- END NEW ---
+
+                // Only build the full glossary if we didn't have an API error above
+                if (glossaryHtml === '') {
+                    for (const [char, id] of sortedUnknowns) {
+                        const dictionaryLink = `https://www.mdbg.net/chinese/dictionary?page=worddict&wdrst=0&wdqb=${encodeURIComponent(char)}`;
+                        
+                        // --- MODIFIED: Add pinyin and definition ---
+                        const data = definitionMap.get(char);
+                        let definitionHtml = '';
+                        if (data) {
+                            definitionHtml = `
+                                <div class="pl-4">
+                                    <span class="font-mono text-sm text-gray-700">${data.pinyin}</span>
+                                    <span class="text-sm text-gray-600 block">${data.definition}</span>
+                                </div>
+                            `;
+                        } else {
+                             // This covers two cases: API failed to return the char, or API failed entirely.
+                            definitionHtml = `
+                                <div class="pl-4">
+                                    <span class="text-sm text-red-500 italic">Definition not found. (Check console for API response details)</span>
+                                </div>
+                            `;
+                        }
+                        
+                        glossaryHtml += 
+                            `<li id="glossary-item-${id}" class="text-lg">
+                                <a href="${dictionaryLink}" target="_blank" class="text-blue-600 hover:underline font-bold text-xl">${char}</a>
+                                ${definitionHtml}
+                            </li>`;
+                        // --- END MODIFIED ---
+                    }
+                }
+
+                // 6. Inject the generated HTML into the page
+                document.getElementById('annotated-text').innerHTML = annotatedHtml;
+                document.getElementById('glossary-list').innerHTML = glossaryHtml;
+                
+                // 7. Show the output section
+                document.getElementById('output-section').classList.remove('hidden');
+
+            } catch (error) {
+                console.error("An error occurred during overall processing:", error);
+                // Use a non-blocking error display
+                document.getElementById('glossary-list').innerHTML = `<li>An unexpected error occurred: ${error.message}</li>`;
+                document.getElementById('output-section').classList.remove('hidden');
+            } finally {
+                // Restore button state
+                processBtn.disabled = false;
+                processBtn.innerHTML = 'Analyze Text';
+            }
+        });
+    </script>
+</body>
+</html>
