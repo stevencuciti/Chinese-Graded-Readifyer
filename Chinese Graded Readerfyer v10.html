@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chinese Graded Reader-fyer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 2. Custom styles for annotation and printing */
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+        }
+        
+        /* --- INTERACTIVE STYLES --- */
+        .unknown-char {
+            background-color: #fef9c3; /* Tailwind 'yellow-100' */
+            color: #713f12; /* Tailwind 'yellow-900' */
+            border-radius: 3px;
+            padding: 0 2px;
+            text-decoration: none;
+            cursor: pointer; /* Indicates clickable */
+            user-select: none;
+            border-bottom: 1px dashed #d97706; /* Visual cue that it's defined */
+        }
+        .unknown-char:hover {
+            background-color: #fde047; /* Darker yellow on hover */
+        }
+
+        .known-char {
+            cursor: pointer; /* Indicates clickable */
+            border-radius: 3px;
+            padding: 0 1px;
+            transition: background-color 0.2s;
+            user-select: none;
+        }
+        .known-char:hover {
+            background-color: #e5e7eb; /* Light gray hover effect */
+            color: #1f2937;
+            text-decoration: underline;
+        }
+
+        .unknown-ref {
+            vertical-align: super;
+            font-size: 0.75em;
+            line-height: 1;
+            margin-left: 1px;
+            color: #dc2626; /* Tailwind 'red-600' */
+            font-weight: bold;
+            text-decoration: none;
+        }
+        /* --- END INTERACTIVE STYLES --- */
+
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* PRINT STYLES */
+        @media print {
+            #input-section, #process-btn, #print-btn, #speak-btn { display: none !important; }
+            #output-section { width: 100% !important; padding: 0 !important; margin: 0 !important; border: none !important; }
+            #progress-section { display: none !important; }
+            #level-select-group { display: none !important; } 
+            
+            /* Remove interactive styling for print */
+            .unknown-char { 
+                background-color: #fef9c3 !important; 
+                color: #000 !important; 
+                -webkit-print-color-adjust: exact; 
+                print-adjust: exact;
+                cursor: default !important;
+                border-bottom: none !important;
+            }
+            .known-char { cursor: default !important; }
+            .known-char:hover { background-color: transparent !important; text-decoration: none !important; }
+            
+            a { text-decoration: none !important; color: inherit !important; }
+            
+            #annotated-text { font-size: 12pt; line-height: 1.5; }
+            h2 { font-size: 16pt !important; padding-top: 1rem; }
+
+            /* Two-Column Glossary Layout */
+            #glossary-list {
+                list-style: decimal !important;
+                margin-left: 2em !important;
+                page-break-before: auto;
+                font-size: 10pt;
+                column-count: 2;
+                column-gap: 2.5rem;
+            }
+            #glossary-list li {
+                -webkit-column-break-inside: avoid;
+                page-break-inside: avoid;
+                break-inside: avoid;
+                padding-bottom: 8px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="max-w-7xl mx-auto p-6 md:p-10">
+        <h1 class="text-3xl font-bold text-center mb-8 text-gray-900">Chinese Graded Reader-fyer</h1>
+
+        <div id="input-section" class="grid md:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <label for="known-chars" class="block text-lg font-semibold mb-2">1. Known Words/Characters</label>
+                <p class="text-sm text-gray-600 mb-4">Saved list of known items (one per line).</p>
+
+                <div id="level-select-group">
+                    <label for="level-select" class="block text-sm font-medium text-gray-700 mb-1 mt-4">Set Known Words to Level:</label>
+                    <select id="level-select" class="w-full p-2 mb-3 border border-gray-300 rounded-md bg-gray-50 focus:ring-2 focus:ring-blue-500">
+                        <option value="">-- Select a level to load --</option>
+                        <option value="level1">Level 1 (Base)</option>
+                        <option value="level2">Level 2 (Cumulative)</option>
+                    </select>
+                </div>
+
+                <textarea id="known-chars" rows="10" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" placeholder="Loading repository..."></textarea>
+            </div>
+            
+            <div class="bg-white p-6 rounded-lg shadow">
+                <label for="input-text" class="block text-lg font-semibold mb-2">2. Text to Analyze</label>
+                <p class="text-sm text-gray-600 mb-4">Paste the full Chinese text you want to read here. (New words will be highlighted.)</p>
+                <textarea id="input-text" rows="10" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" placeholder="今天天气很好，我们去公园玩儿吧。"></textarea>
+            </div>
+        </div>
+
+        <div class="text-center mb-8">
+            <button id="process-btn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 text-lg flex items-center justify-center w-64 mx-auto disabled:opacity-75" style="min-height: 60px;" disabled>
+                <span class="loader"></span>
+                Loading Repository...
+            </button>
+        </div>
+
+        <div id="output-section" class="bg-white p-6 md:p-10 rounded-lg shadow-lg hidden">
+            <div class="flex justify-end gap-3 -mt-4">
+                <button id="speak-btn" class="bg-green-600 text-white font-semibold py-2 px-5 rounded-md hover:bg-green-700 transition flex items-center">
+                    🔊 Read Aloud
+                </button>
+                <button id="print-btn" onclick="window.print()" class="bg-gray-700 text-white font-semibold py-2 px-5 rounded-md hover:bg-gray-800 transition">
+                    Save as PDF
+                </button>
+            </div>
+            
+            <h2 class="text-2xl font-bold mb-6 border-b pb-3">Analyzed Text</h2>
+            <p class="text-xs text-gray-500 mb-2">💡 <b>Tip:</b> Click a <span class="bg-yellow-100 px-1 rounded border-b border-orange-600 border-dashed">highlighted word</span> to make it known. Click a normal word to make it unknown.</p>
+
+            <div id="progress-section" class="mb-8 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div class="flex justify-between mb-2">
+                    <span class="text-sm font-medium text-blue-700" id="progress-text">Knowledge Coverage</span>
+                    <span class="text-sm font-medium text-blue-700" id="progress-percent">0%</span>
+                </div>
+                <div class="w-full bg-blue-200 rounded-full h-4">
+                    <div id="progress-bar" class="bg-blue-600 h-4 rounded-full transition-all duration-1000 ease-out" style="width: 0%"></div>
+                </div>
+                <p id="progress-details" class="text-xs text-blue-600 mt-2 text-center">
+                    </p>
+            </div>
+            <div id="annotated-text" class="text-lg leading-relaxed whitespace-pre-wrap">
+                </div>
+
+            <h2 class="text-2xl font-bold mt-12 mb-6 border-b pb-3">Unknown Word Glossary</h2>
+            <p class="text-sm text-gray-600 mb-4">A list of all unknown words/characters found in the text, in order of appearance. Definitions come from the **embedded dictionary**.</p>
+            <ol id="glossary-list" class="list-decimal list-inside space-y-4">
+                </ol>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ============================================================
+        // 1. DICTIONARY DEFINITIONS
+        // ============================================================
+        const FULL_EMBEDDED_DICTIONARY = {
+            "你好": { pinyin: "nǐ hǎo", definition: "hello" },
+            "天气": { pinyin: "tiān qì", definition: "weather" },
+            "公园": { pinyin: "gōng yuán", definition: "park" },
+            "今天": { pinyin: "jīn tiān", definition: "today" },
+            "很好": { pinyin: "hěn hǎo", definition: "very good" },
+            "我们": { pinyin: "wǒ men", definition: "we, us" },
+            "玩儿": { pinyin: "wánr", definition: "to play" },
+            "吧": { pinyin: "ba", definition: "modal particle" },
+            "很": { pinyin: "hěn", definition: "very" },
+            "好": { pinyin: "hǎo", definition: "good" },
+            "天": { pinyin: "tiān", definition: "day, sky" },
+            "气": { pinyin: "qì", definition: "air, gas" },
+            "我": { pinyin: "wǒ", definition: "I, me" },
+            "你": { pinyin: "nǐ", definition: "you" },
+            "吗": { pinyin: "ma", definition: "question particle" },
+            "他": { pinyin: "tā", definition: "he, him" },
+            "她": { pinyin: "tā", definition: "she, her" },
+            "们": { pinyin: "men", definition: "plural marker" },
+            "见": { pinyin: "jiàn", definition: "to see" },
+            "再见": { pinyin: "zàijiàn", definition: "goodbye" },
+            "不": { pinyin: "bù", definition: "not" },
+            "爸爸": { pinyin: "bàba", definition: "dad" },
+            "妈妈": { pinyin: "māma", definition: "mom" },
+            "哥哥": { pinyin: "gēge", definition: "older brother" },
+            "姐姐": { pinyin: "jiějie", definition: "older sister" },
+            "喜欢": { pinyin: "xǐhuan", definition: "to like" },
+            "吃": { pinyin: "chī", definition: "to eat" },
+            "喝": { pinyin: "hē", definition: "to drink" },
+            "水": { pinyin: "shuǐ", definition: "water" },
+            "名字": { pinyin: "míngzi", definition: "name" },
+            "宿": { pinyin: ["su4"], definition: "old variant of 宿[su4]"},
+            "冥": { pinyin: ["ming2"], definition: "old variant of 冥[ming2]"},
+            "最": { pinyin: ["zui4"], definition: "variant of 最[zui4]"},
+            "一个巴掌拍不响": { pinyin: ["yi1 ge5 ba1 zhang3 pai1 bu4 xiang3"], definition: "lit. one palm alone cannot clap (proverb)/fig. it takes two persons to start a dispute/it takes two to tango/it's difficult to achieve anything without support"},
+            "鿬": { pinyin: ["tian2"], definition: "tennessine (chemistry)" }
+        };
+
+        // Sort keys by length so we match "Today" before "To"
+        const DICTIONARY_KEYS_SORTED = Object.keys(FULL_EMBEDDED_DICTIONARY).sort((a, b) => b.length - a.length);
+
+        // =================================================
+        // 2. HUGE WORD LISTS (Cumulative)
+        // =================================================
+        
+        const LEVEL_1_BASE = `
+你 好 吗 我 他 她 们 吧 见 再见 不
+这里 那里 哪里 谁 什么 时候 怎么 怎么样
+`;
+        const LEVEL_2_ADDITIONS = `
+爸爸 妈妈 哥哥 姐姐 喜欢 吃 喝 水 名字
+老师 学生 学校 同学 朋友 医生 医院 商店
+`;
+
+        const PRESET_WORD_LISTS = {
+            "level1": LEVEL_1_BASE,
+            "level2": LEVEL_1_BASE + " " + LEVEL_2_ADDITIONS 
+        };
+        // =================================================
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId = null;
+        let firestoreKnownSet = new Set();
+        let manualKnownSet = new Set();   
+        let manualUnknownSet = new Set(); 
+
+        const KNOWN_CHARS_INPUT = document.getElementById('known-chars');
+        const INPUT_TEXT = document.getElementById('input-text');
+        const PROCESS_BTN = document.getElementById('process-btn');
+        const OUTPUT_SECTION = document.getElementById('output-section');
+        const ANNOTATED_TEXT_DIV = document.getElementById('annotated-text');
+        const GLOSSARY_LIST = document.getElementById('glossary-list');
+        const LEVEL_SELECT = document.getElementById('level-select'); 
+        const SPEAK_BTN = document.getElementById('speak-btn');
+
+        const KNOWN_CHARACTERS_COLLECTION = 'chinese_repository';
+        const KNOWN_CHARACTERS_DOC_ID = 'known_list';
+
+        function getUserDocRef() {
+            if (!db || !userId) return null;
+            return doc(db, 'artifacts', appId, 'users', userId, KNOWN_CHARACTERS_COLLECTION, KNOWN_CHARACTERS_DOC_ID);
+        }
+
+        function setupRealtimeListener() {
+            const docRef = getUserDocRef();
+            if (!docRef) {
+                console.error("No DocRef. Fallback to local input.");
+                PROCESS_BTN.disabled = false;
+                PROCESS_BTN.innerHTML = 'Analyze Text';
+                KNOWN_CHARS_INPUT.placeholder = 'Could not load repository. Using local input only.';
+                return;
+            }
+
+            onSnapshot(docRef, (doc) => {
+                let knownCharsString = '';
+                if (doc.exists()) {
+                    const data = doc.data();
+                    knownCharsString = data.knownCharacters || '';
+                }
+                const knownItems = knownCharsString.split(/[\s\n,]+/).filter(Boolean);
+                firestoreKnownSet = new Set(knownItems);
+                
+                if (KNOWN_CHARS_INPUT.placeholder === 'Loading repository...') {
+                     KNOWN_CHARS_INPUT.value = Array.from(firestoreKnownSet).join('\n');
+                     KNOWN_CHARS_INPUT.placeholder = 'Paste all your known words and characters here (one per line)...';
+                }
+
+                PROCESS_BTN.disabled = false;
+                PROCESS_BTN.innerHTML = 'Analyze Text';
+                PROCESS_BTN.querySelector('.loader').style.display = 'none';
+            }, (error) => {
+                console.error("Error loading repository from database:", error);
+                PROCESS_BTN.disabled = false;
+                PROCESS_BTN.innerHTML = 'Analyze Text (Repo Error)';
+                PROCESS_BTN.querySelector('.loader').style.display = 'none';
+                KNOWN_CHARS_INPUT.placeholder = 'Error loading persistent data. Using local input only.';
+            });
+        }
+        
+        async function saveKnownCharacters(knownCharsString) {
+            const docRef = getUserDocRef();
+            if (!docRef) {
+                console.error("Cannot save: Database not initialized or User ID missing.");
+                return;
+            }
+            try {
+                await setDoc(docRef, { knownCharacters: knownCharsString });
+            } catch (error) {
+                console.error("Failed to save known characters:", error);
+            }
+        }
+
+        function getDefinition(item) {
+            if (FULL_EMBEDDED_DICTIONARY.hasOwnProperty(item)) {
+                const entry = FULL_EMBEDDED_DICTIONARY[item];
+                const pinyin = Array.isArray(entry.pinyin) ? entry.pinyin.join(', ') : entry.pinyin;
+                return {
+                    pinyin: pinyin,
+                    definition: entry.definition
+                };
+            }
+            return {
+                pinyin: "??",
+                definition: "Definition not found in the local dictionary."
+            };
+        }
+
+        // --- ROBUST AUDIO LOGIC (Cloud Fallback) ---
+        let isSpeaking = false;
+        let currentAudio = null; // To track Audio object for fallback
+
+        // 1. Helper: Wait for browser voices
+        function waitForVoices() {
+            return new Promise((resolve) => {
+                const voices = window.speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    resolve(voices);
+                } else {
+                    window.speechSynthesis.onvoiceschanged = () => {
+                        resolve(window.speechSynthesis.getVoices());
+                    };
+                    setTimeout(() => resolve([]), 2000); 
+                }
+            });
+        }
+
+        // 2. Helper: Find a Chinese voice
+        function getChineseVoice(voices) {
+            return voices.find(v => v.lang === 'zh-CN' || v.lang === 'zh_CN') || 
+                   voices.find(v => v.lang.startsWith('zh'));
+        }
+
+        // 3. Helper: Play via Cloud API (Fallback)
+        function playCloudAudio(text) {
+            // Use Google Translate's TTS API (unofficial but reliable for this purpose)
+            const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=zh-CN&client=tw-ob`;
+            
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+
+            currentAudio = new Audio(url);
+            
+            currentAudio.onplay = () => {
+                isSpeaking = true;
+                updateSpeakButton('playing');
+            };
+            currentAudio.onended = () => {
+                isSpeaking = false;
+                updateSpeakButton('stopped');
+                currentAudio = null;
+            };
+            currentAudio.onerror = (e) => {
+                console.error("Cloud Audio Failed", e);
+                isSpeaking = false;
+                updateSpeakButton('stopped');
+                alert("Audio playback failed even with cloud backup.");
+            };
+
+            currentAudio.play();
+        }
+
+        function updateSpeakButton(state) {
+            if (state === 'playing') {
+                SPEAK_BTN.innerHTML = '⏹ Stop';
+                SPEAK_BTN.classList.remove('bg-green-600', 'hover:bg-green-700');
+                SPEAK_BTN.classList.add('bg-red-600', 'hover:bg-red-700');
+            } else {
+                SPEAK_BTN.innerHTML = '🔊 Read Aloud';
+                SPEAK_BTN.classList.remove('bg-red-600', 'hover:bg-red-700');
+                SPEAK_BTN.classList.add('bg-green-600', 'hover:bg-green-700');
+            }
+        }
+
+        SPEAK_BTN.addEventListener('click', async () => {
+            // STOP logic
+            if (isSpeaking) {
+                if (window.speechSynthesis.speaking) {
+                    window.speechSynthesis.cancel();
+                }
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+                isSpeaking = false;
+                updateSpeakButton('stopped');
+                return;
+            }
+
+            // START logic
+            const textToRead = INPUT_TEXT.value;
+            if (!textToRead) {
+                alert("Please paste some Chinese text to analyze first.");
+                return;
+            }
+
+            SPEAK_BTN.innerHTML = '<span class="loader" style="width:16px;height:16px;border-width:2px;"></span> Loading...';
+
+            // Try local voices first
+            const voices = await waitForVoices();
+            const zhVoice = getChineseVoice(voices);
+
+            if (zhVoice) {
+                // Use Local Browser Voice
+                const utterance = new SpeechSynthesisUtterance(textToRead);
+                utterance.voice = zhVoice;
+                utterance.lang = zhVoice.lang;
+                utterance.rate = 0.9;
+
+                utterance.onstart = () => { isSpeaking = true; updateSpeakButton('playing'); };
+                utterance.onend = () => { isSpeaking = false; updateSpeakButton('stopped'); };
+                utterance.onerror = (e) => {
+                    console.error("Local Speech Error", e);
+                    if (e.error !== 'interrupted' && e.error !== 'canceled') {
+                        // If local fails, try backup
+                        console.warn("Local speech failed, trying cloud backup...");
+                        playCloudAudio(textToRead);
+                    } else {
+                        isSpeaking = false;
+                        updateSpeakButton('stopped');
+                    }
+                };
+                window.speechSynthesis.speak(utterance);
+            } else {
+                // Use Cloud Backup immediately if no local voice
+                console.warn("No local Chinese voice. Using Cloud Backup.");
+                playCloudAudio(textToRead);
+            }
+        });
+
+
+        // --- GLOBAL TOGGLE FUNCTION ---
+        window.toggleWordState = function(word, currentStatus) {
+            if (currentStatus === 'known') {
+                manualUnknownSet.add(word);
+                manualKnownSet.delete(word);
+            } else {
+                manualKnownSet.add(word);
+                manualUnknownSet.delete(word);
+            }
+            renderAnalyzedText();
+        };
+
+        // --- MAIN RENDER FUNCTION ---
+        function renderAnalyzedText() {
+            const inputText = INPUT_TEXT.value;
+            
+            const effectiveKnownItems = new Set(firestoreKnownSet);
+            manualKnownSet.forEach(word => effectiveKnownItems.add(word));
+            manualUnknownSet.forEach(word => effectiveKnownItems.delete(word));
+
+            let annotatedHtml = '';
+            const glossary = [];
+            const glossaryIndexMap = new Map();
+            let glossaryIndexCounter = 1; 
+            let i = 0;
+
+            while (i < inputText.length) {
+                const char = inputText[i];
+                if (char === '\n') { annotatedHtml += '<br>'; i++; continue; }
+                if (!char.match(/[\u4e00-\u9fff]/)) { annotatedHtml += char; i++; continue; }
+
+                let matchFound = false;
+                for (const key of DICTIONARY_KEYS_SORTED) {
+                    if (inputText.startsWith(key, i)) {
+                        matchFound = true;
+                        const def = getDefinition(key);
+                        const cleanDef = def.definition.replace(/"/g, '&quot;');
+
+                        if (!effectiveKnownItems.has(key)) {
+                            // === UNKNOWN WORD ===
+                            let refIndex;
+                            if (glossaryIndexMap.has(key)) {
+                                refIndex = glossaryIndexMap.get(key);
+                            } else {
+                                refIndex = glossaryIndexCounter++;
+                                glossaryIndexMap.set(key, refIndex);
+                                glossary.push({ item: key, index: refIndex, pinyin: def.pinyin, definition: def.definition });
+                            }
+                            
+                            annotatedHtml += `<a href="#" class="unknown-char" 
+                                                 onclick="event.preventDefault(); window.toggleWordState('${key}', 'unknown');" 
+                                                 title="${key} (${def.pinyin}): ${cleanDef} (Click to make KNOWN)">` +
+                                             `${key}` + 
+                                             `<sup class="unknown-ref"> ${refIndex}</sup>` +
+                                             `</a>`;
+                        } else {
+                            // === KNOWN WORD ===
+                            annotatedHtml += `<span class="known-char" 
+                                                    onclick="window.toggleWordState('${key}', 'known')" 
+                                                    title="${key} (${def.pinyin}): ${cleanDef} (Click to make UNKNOWN)">${key}</span>`;
+                        }
+                        i += key.length;
+                        break;
+                    }
+                }
+
+                if (!matchFound) {
+                    const singleChar = inputText[i];
+                    const def = getDefinition(singleChar);
+                    const cleanDef = def.definition.replace(/"/g, '&quot;');
+                    
+                    if (!effectiveKnownItems.has(singleChar)) {
+                        let refIndex;
+                        if (glossaryIndexMap.has(singleChar)) {
+                            refIndex = glossaryIndexMap.get(singleChar);
+                        } else {
+                            refIndex = glossaryIndexCounter++;
+                            glossaryIndexMap.set(singleChar, refIndex);
+                            glossary.push({ item: singleChar, index: refIndex, pinyin: def.pinyin, definition: def.definition });
+                        }
+                        annotatedHtml += `<a href="#" class="unknown-char" 
+                                             onclick="event.preventDefault(); window.toggleWordState('${singleChar}', 'unknown');"
+                                             title="${singleChar} (${def.pinyin}): ${cleanDef} (Click to make KNOWN)">` +
+                                         `${singleChar}` + 
+                                         `<sup class="unknown-ref"> ${refIndex}</sup>` +
+                                         `</a>`;
+                    } else {
+                         annotatedHtml += `<span class="known-char" 
+                                                onclick="window.toggleWordState('${singleChar}', 'known')"
+                                                title="${singleChar} (${def.pinyin}): ${cleanDef} (Click to make UNKNOWN)">${singleChar}</span>`;
+                    }
+                    i++;
+                }
+            } 
+
+            ANNOTATED_TEXT_DIV.innerHTML = annotatedHtml;
+
+            if (glossary.length === 0) {
+                GLOSSARY_LIST.innerHTML = '<li class="text-gray-600">No unknown words or characters found! 🎉</li>';
+            } else {
+                glossary.sort((a, b) => a.index - b.index);
+                GLOSSARY_LIST.innerHTML = glossary.map(item => `
+                    <li id="g${item.index}" class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 transition duration-150">
+                        <span class="text-red-600 font-bold mr-2">(${item.index})</span>
+                        <span class="text-2xl font-serif text-gray-900 mr-4">${item.item}</span> 
+                        <span class="font-semibold text-blue-700 mr-2">${item.pinyin}</span>:
+                        ${item.definition}
+                    </li>
+                `).join('');
+            }
+            
+            let totalItems = 0;
+            let knownCount = 0;
+            let j = 0;
+            while (j < inputText.length) {
+                const char = inputText[j];
+                if (!char.match(/[\u4e00-\u9fff]/)) { j++; continue; }
+                let found = false;
+                for (const key of DICTIONARY_KEYS_SORTED) {
+                    if (inputText.startsWith(key, j)) {
+                        totalItems++;
+                        if (effectiveKnownItems.has(key)) knownCount++;
+                        j += key.length;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    totalItems++;
+                    if (effectiveKnownItems.has(inputText[j])) knownCount++;
+                    j++;
+                }
+            }
+            const percent = totalItems > 0 ? Math.round((knownCount / totalItems) * 100) : 0;
+            requestAnimationFrame(() => { document.getElementById('progress-bar').style.width = `${percent}%`; });
+            document.getElementById('progress-percent').textContent = `${percent}%`;
+            document.getElementById('progress-details').textContent = `You know ${knownCount} out of ${totalItems} words.`;
+        }
+
+
+        PROCESS_BTN.addEventListener('click', async () => {
+            PROCESS_BTN.disabled = true;
+            PROCESS_BTN.innerHTML = '<span class="loader"></span> Processing...';
+            
+            const currentText = KNOWN_CHARS_INPUT.value;
+            const knownItems = currentText.split(/[\s\n,]+/).filter(Boolean);
+            firestoreKnownSet = new Set(knownItems);
+
+            try {
+                 await saveKnownCharacters(currentText);
+            } catch (err) {
+                console.error("Save failed but continuing analysis", err);
+            }
+
+            manualKnownSet.clear();
+            manualUnknownSet.clear();
+            renderAnalyzedText();
+
+            OUTPUT_SECTION.classList.remove('hidden');
+            PROCESS_BTN.disabled = false;
+            PROCESS_BTN.innerHTML = 'Analyze Text';
+        });
+
+        LEVEL_SELECT.addEventListener('change', async (e) => {
+            const selectedLevel = e.target.value;
+            if (!selectedLevel) return; 
+
+            const newWordsString = PRESET_WORD_LISTS[selectedLevel];
+            if (!newWordsString) {
+                console.error("No word list found for:", selectedLevel);
+                return;
+            }
+
+            const newWordsArray = newWordsString.split(/[\s\n,]+/); 
+            const replacementString = newWordsArray.filter(Boolean).join('\n');
+
+            KNOWN_CHARS_INPUT.value = replacementString;
+            const knownItems = replacementString.split(/[\s\n,]+/).filter(Boolean);
+            firestoreKnownSet = new Set(knownItems);
+
+            await saveKnownCharacters(replacementString);
+        });
+
+
+        // --- Firebase Initialization (Unchanged) ---
+        async function initializeFirebase() {
+            try {
+                // setLogLevel('debug');
+
+                if (!firebaseConfig || !firebaseConfig.apiKey) {
+                    console.error("Firebase configuration is missing or incomplete.");
+                    KNOWN_CHARS_INPUT.value = 'Cannot connect to database. Please use local input only.';
+                    KNOWN_CHARS_INPUT.disabled = false;
+                    PROCESS_BTN.disabled = false;
+                    PROCESS_BTN.innerHTML = 'Analyze Text';
+                    PROCESS_BTN.querySelector('.loader').style.display = 'none';
+                    return;
+                }
+                
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        setupRealtimeListener();
+                    } else {
+                        userId = crypto.randomUUID();
+                        console.warn("Signed in anonymously or using fallback ID:", userId);
+                        setupRealtimeListener();
+                    }
+                });
+            } catch (error) { 
+                console.error("Firebase initialization failed:", error);
+                KNOWN_CHARS_INPUT.value = 'Paste your known characters here.';
+                PROCESS_BTN.disabled = false;
+                PROCESS_BTN.innerHTML = 'Analyze Text';
+                PROCESS_BTN.querySelector('.loader').style.display = 'none';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeFirebase);
+    </script>
+</body>
+</html>
